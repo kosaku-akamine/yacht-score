@@ -68,7 +68,7 @@ const categories: Category[] = [
   },
   {
     id: "large-straight",
-    name: "B.ストレート",
+    name: "L.ストレート",
     minScore: 0,
     maxScore: 40,
     fixedScore: 40,
@@ -267,7 +267,7 @@ function App() {
 
         <div>
           <span>ボーナス</span>
-          <strong>{bonusScore}</strong>
+          <strong>{bonusScore}点</strong>
         </div>
       </section>
 
