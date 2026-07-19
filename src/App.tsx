@@ -102,14 +102,17 @@ function App() {
 
   const [errorMessage, setErrorMessage] = useState("");
 
-  const totalScore = Object.values(scores).reduce<number>(
-    (total, score) => total + (score ?? 0),
-    0,
-  );
-
   const upperScore = categories
     .slice(0, 6)
     .reduce<number>((total, category) => total + (scores[category.id] ?? 0), 0);
+
+  const bonusScore = upperScore >= 63 ? 35 : 0;
+
+  const totalScore =
+    Object.values(scores).reduce<number>(
+      (total, score) => total + (score ?? 0),
+      0,
+    ) + bonusScore;
 
   const handleSelectCategory = (categoryId: string) => {
     const currentScore = scores[categoryId];
@@ -264,7 +267,7 @@ function App() {
 
         <div>
           <span>ボーナス</span>
-          <strong>{upperScore >= 63 ? "35点" : "0点"}</strong>
+          <strong>{bonusScore}</strong>
         </div>
       </section>
 
