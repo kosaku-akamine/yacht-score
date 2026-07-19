@@ -4,21 +4,87 @@ import "./App.css";
 type Category = {
   id: string;
   name: string;
+  minScore: number;
+  maxScore: number;
+  fixedScore?: number;
 };
 
 const categories: Category[] = [
-  { id: "aces", name: "エース" },
-  { id: "deuces", name: "デュース" },
-  { id: "threes", name: "トレイ" },
-  { id: "fours", name: "フォーズ" },
-  { id: "fives", name: "ファイブ" },
-  { id: "sixes", name: "シックス" },
-  { id: "four-of-a-kind", name: "フォーダイス" },
-  { id: "full-house", name: "フルハウス" },
-  { id: "small-straight", name: "S.ストレート" },
-  { id: "large-straight", name: "B.ストレート" },
-  { id: "yacht", name: "ヨット" },
-  { id: "choice", name: "チョイス" },
+  {
+    id: "aces",
+    name: "エース",
+    minScore: 0,
+    maxScore: 5,
+  },
+  {
+    id: "deuces",
+    name: "デュース",
+    minScore: 0,
+    maxScore: 10,
+  },
+  {
+    id: "threes",
+    name: "トレイ",
+    minScore: 0,
+    maxScore: 15,
+  },
+  {
+    id: "fours",
+    name: "フォーズ",
+    minScore: 0,
+    maxScore: 20,
+  },
+  {
+    id: "fives",
+    name: "ファイブ",
+    minScore: 0,
+    maxScore: 25,
+  },
+  {
+    id: "sixes",
+    name: "シックス",
+    minScore: 0,
+    maxScore: 30,
+  },
+  {
+    id: "four-of-a-kind",
+    name: "フォーダイス",
+    minScore: 0,
+    maxScore: 30,
+  },
+  {
+    id: "full-house",
+    name: "フルハウス",
+    minScore: 0,
+    maxScore: 25,
+    fixedScore: 25,
+  },
+  {
+    id: "small-straight",
+    name: "S.ストレート",
+    minScore: 0,
+    maxScore: 30,
+    fixedScore: 30,
+  },
+  {
+    id: "large-straight",
+    name: "B.ストレート",
+    minScore: 0,
+    maxScore: 40,
+    fixedScore: 40,
+  },
+  {
+    id: "yacht",
+    name: "ヨット",
+    minScore: 0,
+    maxScore: 10000,
+  },
+  {
+    id: "choice",
+    name: "チョイス",
+    minScore: 0,
+    maxScore: 30,
+  },
 ];
 
 function App() {
@@ -31,29 +97,80 @@ function App() {
   });
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
   const [scoreInput, setScoreInput] = useState("");
+
+  const [errorMessage, setErrorMessage] = useState("");
 
   const totalScore = Object.values(scores).reduce<number>(
     (total, score) => total + (score ?? 0),
     0,
   );
+
   const upperScore = categories
     .slice(0, 6)
     .reduce<number>((total, category) => total + (scores[category.id] ?? 0), 0);
 
   const handleSelectCategory = (categoryId: string) => {
-    if (scores[categoryId] !== null) return;
+    const currentScore = scores[categoryId];
 
     setSelectedCategory(categoryId);
-    setScoreInput("");
+
+    // 編集の場合は、現在の得点を入力欄に表示
+    if (currentScore !== null) {
+      setScoreInput(String(currentScore));
+    } else {
+      setScoreInput("");
+    }
+
+    setErrorMessage("");
   };
 
   const handleSaveScore = () => {
-    if (!selectedCategory || scoreInput === "") return;
+    if (!selectedCategory || scoreInput === "") {
+      setErrorMessage("得点を入力してください");
+      return;
+    }
+
+    const category = categories.find(
+      (category) => category.id === selectedCategory,
+    );
+
+    if (!category) return;
 
     const score = Number(scoreInput);
 
-    if (Number.isNaN(score) || score < 0) return;
+    // 数値でない場合
+    if (Number.isNaN(score)) {
+      setErrorMessage("数字を入力してください");
+      return;
+    }
+
+    // 整数でない場合
+    if (!Number.isInteger(score)) {
+      setErrorMessage("整数を入力してください");
+      return;
+    }
+
+    // 最小値・最大値チェック
+    if (score < category.minScore || score > category.maxScore) {
+      setErrorMessage(
+        `${category.name}は${category.minScore}〜${category.maxScore}点で入力してください`,
+      );
+      return;
+    }
+
+    // 固定得点の役のチェック
+    if (
+      category.fixedScore !== undefined &&
+      score !== 0 &&
+      score !== category.fixedScore
+    ) {
+      setErrorMessage(
+        `${category.name}は0点または${category.fixedScore}点で入力してください`,
+      );
+      return;
+    }
 
     const newScores = {
       ...scores,
@@ -61,10 +178,12 @@ function App() {
     };
 
     setScores(newScores);
+
     localStorage.setItem("yacht-scores", JSON.stringify(newScores));
 
     setSelectedCategory(null);
     setScoreInput("");
+    setErrorMessage("");
   };
 
   const handleReset = () => {
@@ -75,12 +194,17 @@ function App() {
     );
 
     setScores(resetScores);
+
     localStorage.removeItem("yacht-scores");
   };
 
   const selectedCategoryName = categories.find(
     (category) => category.id === selectedCategory,
   )?.name;
+
+  const selectedCategoryData = categories.find(
+    (category) => category.id === selectedCategory,
+  );
 
   return (
     <main className="app">
@@ -110,18 +234,23 @@ function App() {
             const isUsed = score !== null;
 
             return (
-              <button
+              <div
                 key={category.id}
                 className={`score-row ${isUsed ? "used" : ""}`}
-                onClick={() => handleSelectCategory(category.id)}
-                disabled={isUsed}
               >
                 <span className="category-name">{category.name}</span>
 
                 <span className="category-score">
                   {isUsed ? `${score}点` : "未入力"}
                 </span>
-              </button>
+
+                <button
+                  className="edit-button"
+                  onClick={() => handleSelectCategory(category.id)}
+                >
+                  {isUsed ? "編集" : "入力"}
+                </button>
+              </div>
             );
           })}
         </div>
@@ -143,21 +272,43 @@ function App() {
         <div className="modal-overlay">
           <div className="score-modal">
             <h2>{selectedCategoryName}</h2>
-            <p>今回の得点を入力してください</p>
+
+            <p>
+              {scores[selectedCategory] !== null
+                ? "得点を修正してください"
+                : "今回の得点を入力してください"}
+            </p>
 
             <input
               type="number"
               inputMode="numeric"
-              min="0"
+              min={selectedCategoryData?.minScore}
+              max={selectedCategoryData?.maxScore}
               value={scoreInput}
-              onChange={(event) => setScoreInput(event.target.value)}
+              onChange={(event) => {
+                setScoreInput(event.target.value);
+                setErrorMessage("");
+              }}
               autoFocus
             />
+
+            {selectedCategoryData && (
+              <p className="score-range">
+                入力可能範囲：
+                {selectedCategoryData.minScore}〜{selectedCategoryData.maxScore}
+                点
+              </p>
+            )}
+
+            {errorMessage && <p className="error-message">{errorMessage}</p>}
 
             <div className="modal-actions">
               <button
                 className="cancel-button"
-                onClick={() => setSelectedCategory(null)}
+                onClick={() => {
+                  setSelectedCategory(null);
+                  setErrorMessage("");
+                }}
               >
                 キャンセル
               </button>
@@ -167,7 +318,7 @@ function App() {
                 onClick={handleSaveScore}
                 disabled={scoreInput === ""}
               >
-                確定
+                {scores[selectedCategory] !== null ? "更新" : "確定"}
               </button>
             </div>
           </div>

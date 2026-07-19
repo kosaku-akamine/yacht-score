@@ -87,43 +87,55 @@ h1 {
   display: flex;
   width: 100%;
   align-items: center;
-  justify-content: space-between;
   padding: 16px;
   border: none;
   border-bottom: 1px solid #eee;
   background: white;
   color: #222;
   text-align: left;
-  cursor: pointer;
 }
 
 .score-row:last-child {
   border-bottom: none;
 }
 
-.score-row:not(:disabled):active {
-  background: #f3f4f6;
-}
-
 .score-row.used {
   background: #f8f8f8;
   color: #999;
-  cursor: default;
 }
 
 .category-name {
+  width: 140px;
   font-size: 16px;
   font-weight: 600;
 }
 
 .category-score {
+  width: 70px;
   font-size: 15px;
   font-weight: 700;
+  text-align: left;
 }
 
 .score-row:not(.used) .category-score {
   color: #999;
   font-weight: 400;
+}
+
+.edit-button {
+  min-width: 48px;
+  margin-left: auto;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  color: #666;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.edit-button:active {
+  background: #f3f4f6;
 }
 
 .bonus-section {
@@ -186,6 +198,19 @@ h1 {
   border: 1px solid #ccc;
   border-radius: 8px;
   font-size: 24px;
+  text-align: center;
+}
+
+.score-range {
+  margin: 8px 0 0 !important;
+  color: #888 !important;
+  font-size: 12px !important;
+}
+
+.error-message {
+  margin: 8px 0 0 !important;
+  color: #dc2626 !important;
+  font-size: 13px !important;
   text-align: center;
 }
 
