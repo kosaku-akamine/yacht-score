@@ -33,14 +33,13 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [scoreInput, setScoreInput] = useState("");
 
-  const totalScore = Object.values(scores).reduce(
+  const totalScore = Object.values(scores).reduce<number>(
     (total, score) => total + (score ?? 0),
     0,
   );
-
   const upperScore = categories
     .slice(0, 6)
-    .reduce((total, category) => total + (scores[category.id] ?? 0), 0);
+    .reduce<number>((total, category) => total + (scores[category.id] ?? 0), 0);
 
   const handleSelectCategory = (categoryId: string) => {
     if (scores[categoryId] !== null) return;
