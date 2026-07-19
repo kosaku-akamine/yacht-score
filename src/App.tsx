@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 
 type Category = {
@@ -8,6 +8,25 @@ type Category = {
   maxScore: number;
   fixedScore?: number;
 };
+
+type GameResponse = {
+  gameCode: string;
+  players: unknown;
+};
+
+type PlayerResponse = {
+  id?: number;
+  name: string;
+};
+
+type GameSession = {
+  gameCode: string;
+  playerName: string;
+};
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ??
+  "https://yacht-score-production.up.railway.app";
 
 const categories: Category[] = [
   {
@@ -87,39 +106,217 @@ const categories: Category[] = [
   },
 ];
 
-function App() {
-  const [scores, setScores] = useState<Record<string, number | null>>(() => {
-    const savedScores = localStorage.getItem("yacht-scores");
+const createEmptyScores = (): Record<string, number | null> =>
+  Object.fromEntries(
+    categories.map((category) => [category.id, null]),
+  ) as Record<string, number | null>;
 
-    return savedScores
-      ? JSON.parse(savedScores)
-      : Object.fromEntries(categories.map((category) => [category.id, null]));
-  });
+const getScoreStorageKey = (session: GameSession) =>
+  `yacht-scores-${session.gameCode}-${session.playerName}`;
+
+const loadSession = (): GameSession | null => {
+  const savedSession = localStorage.getItem("yacht-session");
+
+  if (!savedSession) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(savedSession) as GameSession;
+  } catch {
+    localStorage.removeItem("yacht-session");
+    return null;
+  }
+};
+
+const loadScores = (
+  session: GameSession | null,
+): Record<string, number | null> => {
+  if (!session) {
+    return createEmptyScores();
+  }
+
+  const savedScores = localStorage.getItem(getScoreStorageKey(session));
+
+  if (!savedScores) {
+    return createEmptyScores();
+  }
+
+  try {
+    return JSON.parse(savedScores) as Record<string, number | null>;
+  } catch {
+    return createEmptyScores();
+  }
+};
+
+function App() {
+  const [session, setSession] = useState<GameSession | null>(() =>
+    loadSession(),
+  );
+
+  const [scores, setScores] = useState<Record<string, number | null>>(() =>
+    loadScores(loadSession()),
+  );
+
+  const [playerNameInput, setPlayerNameInput] = useState("");
+  const [gameCodeInput, setGameCodeInput] = useState("");
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-
   const [scoreInput, setScoreInput] = useState("");
 
   const [errorMessage, setErrorMessage] = useState("");
+  const [apiErrorMessage, setApiErrorMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    localStorage.setItem("yacht-session", JSON.stringify(session));
+    setScores(loadScores(session));
+  }, [session]);
 
   const upperScore = categories
     .slice(0, 6)
-    .reduce<number>((total, category) => total + (scores[category.id] ?? 0), 0);
+    .reduce<number>((total, category) => {
+      return total + (scores[category.id] ?? 0);
+    }, 0);
 
   const bonusScore = upperScore >= 63 ? 35 : 0;
 
   const totalScore =
-    Object.values(scores).reduce<number>(
-      (total, score) => total + (score ?? 0),
-      0,
-    ) + bonusScore;
+    Object.values(scores).reduce<number>((total, score) => {
+      return total + (score ?? 0);
+    }, 0) + bonusScore;
+
+  const saveSession = (gameCode: string, playerName: string) => {
+    const newSession: GameSession = {
+      gameCode,
+      playerName,
+    };
+
+    localStorage.setItem("yacht-session", JSON.stringify(newSession));
+    setSession(newSession);
+  };
+
+  const createPlayer = async (
+    gameCode: string,
+    playerName: string,
+  ): Promise<PlayerResponse> => {
+    const response = await fetch(
+      `${API_BASE_URL}/api/games/${gameCode}/players`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: playerName,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        response.status === 404
+          ? "ゲームが見つかりませんでした"
+          : "プレイヤーの登録に失敗しました",
+      );
+    }
+
+    return (await response.json()) as PlayerResponse;
+  };
+
+  const handleCreateGame = async () => {
+    const playerName = playerNameInput.trim();
+
+    if (!playerName) {
+      setApiErrorMessage("名前を入力してください");
+      return;
+    }
+
+    setIsLoading(true);
+    setApiErrorMessage("");
+
+    try {
+      const gameResponse = await fetch(`${API_BASE_URL}/api/games`, {
+        method: "POST",
+      });
+
+      if (!gameResponse.ok) {
+        throw new Error("ゲームの作成に失敗しました");
+      }
+
+      const game = (await gameResponse.json()) as GameResponse;
+
+      await createPlayer(game.gameCode, playerName);
+
+      saveSession(game.gameCode, playerName);
+    } catch (error) {
+      setApiErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "サーバーとの通信に失敗しました",
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleJoinGame = async () => {
+    const playerName = playerNameInput.trim();
+    const gameCode = gameCodeInput.trim().toUpperCase();
+
+    if (!playerName) {
+      setApiErrorMessage("名前を入力してください");
+      return;
+    }
+
+    if (!gameCode) {
+      setApiErrorMessage("ゲームコードを入力してください");
+      return;
+    }
+
+    setIsLoading(true);
+    setApiErrorMessage("");
+
+    try {
+      await createPlayer(gameCode, playerName);
+      saveSession(gameCode, playerName);
+    } catch (error) {
+      setApiErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "サーバーとの通信に失敗しました",
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLeaveGame = () => {
+    if (!window.confirm("このゲームから退出しますか？")) {
+      return;
+    }
+
+    localStorage.removeItem("yacht-session");
+
+    setSession(null);
+    setScores(createEmptyScores());
+    setPlayerNameInput("");
+    setGameCodeInput("");
+    setSelectedCategory(null);
+    setScoreInput("");
+    setErrorMessage("");
+    setApiErrorMessage("");
+  };
 
   const handleSelectCategory = (categoryId: string) => {
     const currentScore = scores[categoryId];
 
     setSelectedCategory(categoryId);
 
-    // 編集の場合は、現在の得点を入力欄に表示
     if (currentScore !== null) {
       setScoreInput(String(currentScore));
     } else {
@@ -135,27 +332,24 @@ function App() {
       return;
     }
 
-    const category = categories.find(
-      (category) => category.id === selectedCategory,
-    );
+    const category = categories.find((item) => item.id === selectedCategory);
 
-    if (!category) return;
+    if (!category) {
+      return;
+    }
 
     const score = Number(scoreInput);
 
-    // 数値でない場合
     if (Number.isNaN(score)) {
       setErrorMessage("数字を入力してください");
       return;
     }
 
-    // 整数でない場合
     if (!Number.isInteger(score)) {
       setErrorMessage("整数を入力してください");
       return;
     }
 
-    // 最小値・最大値チェック
     if (score < category.minScore || score > category.maxScore) {
       setErrorMessage(
         `${category.name}は${category.minScore}〜${category.maxScore}点で入力してください`,
@@ -163,7 +357,6 @@ function App() {
       return;
     }
 
-    // 固定得点の役のチェック
     if (
       category.fixedScore !== undefined &&
       score !== 0 &&
@@ -182,7 +375,12 @@ function App() {
 
     setScores(newScores);
 
-    localStorage.setItem("yacht-scores", JSON.stringify(newScores));
+    if (session) {
+      localStorage.setItem(
+        getScoreStorageKey(session),
+        JSON.stringify(newScores),
+      );
+    }
 
     setSelectedCategory(null);
     setScoreInput("");
@@ -190,24 +388,91 @@ function App() {
   };
 
   const handleReset = () => {
-    if (!window.confirm("得点をすべてリセットしますか？")) return;
+    if (!window.confirm("得点をすべてリセットしますか？")) {
+      return;
+    }
 
-    const resetScores = Object.fromEntries(
-      categories.map((category) => [category.id, null]),
-    );
+    const resetScores = createEmptyScores();
 
     setScores(resetScores);
 
-    localStorage.removeItem("yacht-scores");
+    if (session) {
+      localStorage.removeItem(getScoreStorageKey(session));
+    }
   };
-
-  const selectedCategoryName = categories.find(
-    (category) => category.id === selectedCategory,
-  )?.name;
 
   const selectedCategoryData = categories.find(
     (category) => category.id === selectedCategory,
   );
+
+  if (!session) {
+    return (
+      <main className="app">
+        <header className="header">
+          <div>
+            <p className="subtitle">YACHT SCORE BOARD</p>
+            <h1>ヨット</h1>
+          </div>
+        </header>
+
+        <section className="entry-card">
+          <h2>ゲームを始める</h2>
+
+          <label className="form-field">
+            <span>あなたの名前</span>
+            <input
+              type="text"
+              maxLength={20}
+              value={playerNameInput}
+              onChange={(event) => {
+                setPlayerNameInput(event.target.value);
+                setApiErrorMessage("");
+              }}
+              placeholder="名前を入力"
+            />
+          </label>
+
+          <button
+            className="create-game-button"
+            onClick={handleCreateGame}
+            disabled={isLoading}
+          >
+            {isLoading ? "作成中..." : "新しいゲームを作る"}
+          </button>
+
+          <div className="entry-divider">
+            <span>または</span>
+          </div>
+
+          <label className="form-field">
+            <span>ゲームコード</span>
+            <input
+              type="text"
+              maxLength={6}
+              value={gameCodeInput}
+              onChange={(event) => {
+                setGameCodeInput(event.target.value.toUpperCase());
+                setApiErrorMessage("");
+              }}
+              placeholder="例：E7CE16"
+            />
+          </label>
+
+          <button
+            className="join-game-button"
+            onClick={handleJoinGame}
+            disabled={isLoading}
+          >
+            {isLoading ? "参加中..." : "ゲームに参加する"}
+          </button>
+
+          {apiErrorMessage && (
+            <p className="error-message">{apiErrorMessage}</p>
+          )}
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="app">
@@ -221,6 +486,22 @@ function App() {
           リセット
         </button>
       </header>
+
+      <section className="game-information">
+        <div>
+          <span>ゲームコード</span>
+          <strong>{session.gameCode}</strong>
+        </div>
+
+        <div>
+          <span>プレイヤー</span>
+          <strong>{session.playerName}</strong>
+        </div>
+
+        <button className="leave-button" onClick={handleLeaveGame}>
+          退出
+        </button>
+      </section>
 
       <section className="score-summary">
         <p>合計得点</p>
@@ -271,10 +552,10 @@ function App() {
         </div>
       </section>
 
-      {selectedCategory && (
+      {selectedCategory && selectedCategoryData && (
         <div className="modal-overlay">
           <div className="score-modal">
-            <h2>{selectedCategoryName}</h2>
+            <h2>{selectedCategoryData.name}</h2>
 
             <p>
               {scores[selectedCategory] !== null
@@ -285,8 +566,8 @@ function App() {
             <input
               type="number"
               inputMode="numeric"
-              min={selectedCategoryData?.minScore}
-              max={selectedCategoryData?.maxScore}
+              min={selectedCategoryData.minScore}
+              max={selectedCategoryData.maxScore}
               value={scoreInput}
               onChange={(event) => {
                 setScoreInput(event.target.value);
@@ -295,13 +576,10 @@ function App() {
               autoFocus
             />
 
-            {selectedCategoryData && (
-              <p className="score-range">
-                入力可能範囲：
-                {selectedCategoryData.minScore}〜{selectedCategoryData.maxScore}
-                点
-              </p>
-            )}
+            <p className="score-range">
+              入力可能範囲：{selectedCategoryData.minScore}〜
+              {selectedCategoryData.maxScore}点
+            </p>
 
             {errorMessage && <p className="error-message">{errorMessage}</p>}
 
