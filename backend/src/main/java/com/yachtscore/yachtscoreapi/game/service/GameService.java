@@ -4,12 +4,18 @@ import com.yachtscore.yachtscoreapi.game.dto.GameResponse;
 import com.yachtscore.yachtscoreapi.game.dto.PlayerResponse;
 import com.yachtscore.yachtscoreapi.game.entity.GameEntity;
 import com.yachtscore.yachtscoreapi.game.entity.PlayerEntity;
+import com.yachtscore.yachtscoreapi.game.entity.PlayerScoreEntity;
 import com.yachtscore.yachtscoreapi.game.exception.GameNotFoundException;
+import com.yachtscore.yachtscoreapi.game.exception.PlayerNotFoundException;
 import com.yachtscore.yachtscoreapi.game.repository.GameRepository;
 import com.yachtscore.yachtscoreapi.game.repository.PlayerRepository;
+import com.yachtscore.yachtscoreapi.game.repository.PlayerScoreRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -20,19 +26,24 @@ public class GameService {
 
     private final GameRepository gameRepository;
     private final PlayerRepository playerRepository;
+    private final PlayerScoreRepository playerScoreRepository;
 
     public GameService(
             GameRepository gameRepository,
-            PlayerRepository playerRepository
+            PlayerRepository playerRepository,
+            PlayerScoreRepository playerScoreRepository
     ) {
         this.gameRepository = gameRepository;
         this.playerRepository = playerRepository;
+        this.playerScoreRepository = playerScoreRepository;
     }
 
     public GameResponse createGame() {
         String gameCode = generateUniqueGameCode();
 
-        gameRepository.save(new GameEntity(gameCode));
+        gameRepository.save(
+                new GameEntity(gameCode)
+        );
 
         return new GameResponse(
                 gameCode,
@@ -40,49 +51,325 @@ public class GameService {
         );
     }
 
+    @Transactional(readOnly = true)
     public GameResponse getGame(String gameCode) {
-        validateGameExists(gameCode);
+        String normalizedGameCode =
+                normalizeGameCode(gameCode);
+
+        validateGameExists(normalizedGameCode);
 
         List<PlayerResponse> players =
-                playerRepository.findByGame_GameCode(gameCode)
+                playerRepository.findByGame_GameCode(
+                                normalizedGameCode
+                        )
                         .stream()
-                        .map(player -> new PlayerResponse(
-                                player.getId(),
-                                player.getName()
-                        ))
+                        .map(this::toPlayerResponse)
                         .toList();
 
         return new GameResponse(
-                gameCode,
+                normalizedGameCode,
                 players
         );
     }
 
+    @Transactional
     public PlayerResponse createPlayer(
             String gameCode,
             String playerName
     ) {
-        GameEntity game = gameRepository.findById(gameCode)
-                .orElseThrow(() -> new GameNotFoundException(gameCode));
+        String normalizedGameCode =
+                normalizeGameCode(gameCode);
 
-        PlayerEntity player = new PlayerEntity(
-                generatePlayerId(),
-                playerName,
-                game
-        );
+        String normalizedPlayerName =
+                playerName == null
+                        ? ""
+                        : playerName.trim();
+
+        if (normalizedPlayerName.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Player name is required"
+            );
+        }
+
+        GameEntity game =
+                gameRepository.findById(normalizedGameCode)
+                        .orElseThrow(
+                                () -> new GameNotFoundException(
+                                        normalizedGameCode
+                                )
+                        );
+
+        PlayerEntity player =
+                new PlayerEntity(
+                        generatePlayerId(),
+                        normalizedPlayerName,
+                        game
+                );
 
         playerRepository.save(player);
 
+        return toPlayerResponse(player);
+    }
+
+    @Transactional
+    public PlayerResponse updateScore(
+            String gameCode,
+            String playerId,
+            String categoryId,
+            Integer score
+    ) {
+        String normalizedGameCode =
+                normalizeGameCode(gameCode);
+
+        String normalizedPlayerId =
+                normalizePlayerId(playerId);
+
+        String normalizedCategoryId =
+                normalizeCategoryId(categoryId);
+
+        validateScore(
+                normalizedCategoryId,
+                score
+        );
+
+        PlayerEntity player =
+                playerRepository.findById(normalizedPlayerId)
+                        .filter(playerEntity ->
+                                playerEntity
+                                        .getGame()
+                                        .getGameCode()
+                                        .equals(normalizedGameCode)
+                        )
+                        .orElseThrow(
+                                () -> new PlayerNotFoundException(
+                                        normalizedPlayerId
+                                )
+                        );
+
+        PlayerScoreEntity playerScore =
+                playerScoreRepository
+                        .findByPlayer_IdAndCategoryId(
+                                normalizedPlayerId,
+                                normalizedCategoryId
+                        )
+                        .orElseGet(
+                                () -> new PlayerScoreEntity(
+                                        player,
+                                        normalizedCategoryId,
+                                        score
+                                )
+                        );
+
+        playerScore.updateScore(score);
+
+        playerScoreRepository.save(playerScore);
+
+        return toPlayerResponse(player);
+    }
+
+    private PlayerResponse toPlayerResponse(
+            PlayerEntity player
+    ) {
+        List<PlayerScoreEntity> playerScores =
+                playerScoreRepository.findByPlayer_Id(
+                        player.getId()
+                );
+
+        Map<String, Integer> scores =
+                new LinkedHashMap<>();
+
+        for (PlayerScoreEntity playerScore : playerScores) {
+            scores.put(
+                    playerScore.getCategoryId(),
+                    playerScore.getScore()
+            );
+        }
+
         return new PlayerResponse(
                 player.getId(),
-                player.getName()
+                player.getName(),
+                scores
         );
     }
 
-    private void validateGameExists(String gameCode) {
+    private void validateGameExists(
+            String gameCode
+    ) {
         if (!gameRepository.existsById(gameCode)) {
             throw new GameNotFoundException(gameCode);
         }
+    }
+
+    private void validateScore(
+            String categoryId,
+            Integer score
+    ) {
+        if (score == null) {
+            throw new IllegalArgumentException(
+                    "Score is required"
+            );
+        }
+
+        switch (categoryId) {
+            case "aces" ->
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            5
+                    );
+
+            case "deuces" ->
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            10
+                    );
+
+            case "threes" ->
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            15
+                    );
+
+            case "fours" ->
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            20
+                    );
+
+            case "fives" ->
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            25
+                    );
+
+            case "sixes",
+                 "three-of-a-kind",
+                 "four-of-a-kind",
+                 "choice" ->
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            30
+                    );
+
+            case "full-house" ->
+                    validateFixedScore(
+                            categoryId,
+                            score,
+                            25
+                    );
+
+            case "small-straight" ->
+                    validateFixedScore(
+                            categoryId,
+                            score,
+                            30
+                    );
+
+            case "large-straight" ->
+                    validateFixedScore(
+                            categoryId,
+                            score,
+                            40
+                    );
+
+            case "yacht" ->
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            10000
+                    );
+
+            default ->
+                    throw new IllegalArgumentException(
+                            "Unknown category: "
+                                    + categoryId
+                    );
+        }
+    }
+
+    private void validateRange(
+            String categoryId,
+            int score,
+            int minScore,
+            int maxScore
+    ) {
+        if (score < minScore || score > maxScore) {
+            throw new IllegalArgumentException(
+                    categoryId
+                            + " must be between "
+                            + minScore
+                            + " and "
+                            + maxScore
+            );
+        }
+    }
+
+    private void validateFixedScore(
+            String categoryId,
+            int score,
+            int fixedScore
+    ) {
+        if (score != 0 && score != fixedScore) {
+            throw new IllegalArgumentException(
+                    categoryId
+                            + " must be 0 or "
+                            + fixedScore
+            );
+        }
+    }
+
+    private String normalizeGameCode(
+            String gameCode
+    ) {
+        if (gameCode == null || gameCode.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Game code is required"
+            );
+        }
+
+        return gameCode
+                .trim()
+                .toUpperCase();
+    }
+
+    private String normalizePlayerId(
+            String playerId
+    ) {
+        if (playerId == null || playerId.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Player id is required"
+            );
+        }
+
+        return playerId
+                .trim()
+                .toUpperCase();
+    }
+
+    private String normalizeCategoryId(
+            String categoryId
+    ) {
+        if (categoryId == null || categoryId.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Category id is required"
+            );
+        }
+
+        return categoryId
+                .trim()
+                .toLowerCase();
     }
 
     private String generateUniqueGameCode() {
@@ -92,7 +379,10 @@ public class GameService {
             gameCode = UUID.randomUUID()
                     .toString()
                     .replace("-", "")
-                    .substring(0, GAME_CODE_LENGTH)
+                    .substring(
+                            0,
+                            GAME_CODE_LENGTH
+                    )
                     .toUpperCase();
         } while (gameRepository.existsById(gameCode));
 
@@ -103,7 +393,10 @@ public class GameService {
         return UUID.randomUUID()
                 .toString()
                 .replace("-", "")
-                .substring(0, PLAYER_ID_LENGTH)
+                .substring(
+                        0,
+                        PLAYER_ID_LENGTH
+                )
                 .toUpperCase();
     }
 }
