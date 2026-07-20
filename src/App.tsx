@@ -393,20 +393,6 @@ function App() {
     setErrorMessage("");
   };
 
-  const handleReset = () => {
-    if (!window.confirm("得点をすべてリセットしますか？")) {
-      return;
-    }
-
-    const resetScores = createEmptyScores();
-
-    setScores(resetScores);
-
-    if (session) {
-      localStorage.removeItem(getScoreStorageKey(session));
-    }
-  };
-
   const selectedCategoryData = categories.find(
     (category) => category.id === selectedCategory,
   );
@@ -487,10 +473,6 @@ function App() {
           <p className="subtitle">YACHT SCORE BOARD</p>
           <h1>ヨット</h1>
         </div>
-
-        <button className="reset-button" onClick={handleReset}>
-          リセット
-        </button>
       </header>
 
       <section className="game-information">
