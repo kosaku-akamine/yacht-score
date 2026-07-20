@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
 type Category = {
@@ -9,18 +9,20 @@ type Category = {
   fixedScore?: number;
 };
 
-type GameResponse = {
-  gameCode: string;
-  players: unknown;
+type PlayerResponse = {
+  id: string;
+  name: string;
+  scores: Record<string, number>;
 };
 
-type PlayerResponse = {
-  id?: number;
-  name: string;
+type GameResponse = {
+  gameCode: string;
+  players: PlayerResponse[];
 };
 
 type GameSession = {
   gameCode: string;
+  playerId: string;
   playerName: string;
 };
 
@@ -29,42 +31,12 @@ const API_BASE_URL =
   "https://yacht-score-production.up.railway.app";
 
 const categories: Category[] = [
-  {
-    id: "aces",
-    name: "エース",
-    minScore: 0,
-    maxScore: 5,
-  },
-  {
-    id: "deuces",
-    name: "デュース",
-    minScore: 0,
-    maxScore: 10,
-  },
-  {
-    id: "threes",
-    name: "トレイ",
-    minScore: 0,
-    maxScore: 15,
-  },
-  {
-    id: "fours",
-    name: "フォーズ",
-    minScore: 0,
-    maxScore: 20,
-  },
-  {
-    id: "fives",
-    name: "ファイブ",
-    minScore: 0,
-    maxScore: 25,
-  },
-  {
-    id: "sixes",
-    name: "シックス",
-    minScore: 0,
-    maxScore: 30,
-  },
+  { id: "aces", name: "エース", minScore: 0, maxScore: 5 },
+  { id: "deuces", name: "デュース", minScore: 0, maxScore: 10 },
+  { id: "threes", name: "トレイ", minScore: 0, maxScore: 15 },
+  { id: "fours", name: "フォーズ", minScore: 0, maxScore: 20 },
+  { id: "fives", name: "ファイブ", minScore: 0, maxScore: 25 },
+  { id: "sixes", name: "シックス", minScore: 0, maxScore: 30 },
   {
     id: "three-of-a-kind",
     name: "スリーダイス",
@@ -98,27 +70,9 @@ const categories: Category[] = [
     maxScore: 40,
     fixedScore: 40,
   },
-  {
-    id: "yacht",
-    name: "ヨット",
-    minScore: 0,
-    maxScore: 10000,
-  },
-  {
-    id: "choice",
-    name: "チョイス",
-    minScore: 0,
-    maxScore: 30,
-  },
+  { id: "yacht", name: "ヨット", minScore: 0, maxScore: 10000 },
+  { id: "choice", name: "チョイス", minScore: 0, maxScore: 30 },
 ];
-
-const createEmptyScores = (): Record<string, number | null> =>
-  Object.fromEntries(
-    categories.map((category) => [category.id, null]),
-  ) as Record<string, number | null>;
-
-const getScoreStorageKey = (session: GameSession) =>
-  `yacht-scores-${session.gameCode}-${session.playerName}`;
 
 const loadSession = (): GameSession | null => {
   const savedSession = localStorage.getItem("yacht-session");
@@ -128,41 +82,57 @@ const loadSession = (): GameSession | null => {
   }
 
   try {
-    return JSON.parse(savedSession) as GameSession;
+    const parsed = JSON.parse(savedSession) as Partial<GameSession>;
+
+    if (
+      typeof parsed.gameCode !== "string" ||
+      typeof parsed.playerId !== "string" ||
+      typeof parsed.playerName !== "string"
+    ) {
+      localStorage.removeItem("yacht-session");
+      return null;
+    }
+
+    return {
+      gameCode: parsed.gameCode,
+      playerId: parsed.playerId,
+      playerName: parsed.playerName,
+    };
   } catch {
     localStorage.removeItem("yacht-session");
     return null;
   }
 };
 
-const loadScores = (
-  session: GameSession | null,
-): Record<string, number | null> => {
-  if (!session) {
-    return createEmptyScores();
-  }
+const getPlayerScore = (
+  player: PlayerResponse,
+  categoryId: string,
+): number | null => {
+  const score = player.scores?.[categoryId];
+  return typeof score === "number" ? score : null;
+};
 
-  const savedScores = localStorage.getItem(getScoreStorageKey(session));
+const calculateUpperScore = (player: PlayerResponse): number =>
+  categories.slice(0, 6).reduce((total, category) => {
+    return total + (getPlayerScore(player, category.id) ?? 0);
+  }, 0);
 
-  if (!savedScores) {
-    return createEmptyScores();
-  }
+const calculateBonusScore = (player: PlayerResponse): number =>
+  calculateUpperScore(player) >= 63 ? 35 : 0;
 
-  try {
-    return JSON.parse(savedScores) as Record<string, number | null>;
-  } catch {
-    return createEmptyScores();
-  }
+const calculateTotalScore = (player: PlayerResponse): number => {
+  const categoryTotal = categories.reduce((total, category) => {
+    return total + (getPlayerScore(player, category.id) ?? 0);
+  }, 0);
+
+  return categoryTotal + calculateBonusScore(player);
 };
 
 function App() {
   const [session, setSession] = useState<GameSession | null>(() =>
     loadSession(),
   );
-
-  const [scores, setScores] = useState<Record<string, number | null>>(() =>
-    loadScores(loadSession()),
-  );
+  const [game, setGame] = useState<GameResponse | null>(null);
 
   const [playerNameInput, setPlayerNameInput] = useState("");
   const [gameCodeInput, setGameCodeInput] = useState("");
@@ -173,32 +143,85 @@ function App() {
   const [errorMessage, setErrorMessage] = useState("");
   const [apiErrorMessage, setApiErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isSavingScore, setIsSavingScore] = useState(false);
+
+  const currentPlayer = useMemo(() => {
+    if (!session || !game) {
+      return null;
+    }
+
+    return (
+      game.players.find((player) => player.id === session.playerId) ?? null
+    );
+  }, [game, session]);
+
+  const selectedCategoryData = categories.find(
+    (category) => category.id === selectedCategory,
+  );
+
+  const fetchGame = async (
+    gameCode: string,
+    showError = true,
+  ): Promise<GameResponse | null> => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/games/${encodeURIComponent(gameCode)}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          response.status === 404
+            ? "ゲームが見つかりませんでした"
+            : "ゲーム情報の取得に失敗しました",
+        );
+      }
+
+      const gameResponse = (await response.json()) as GameResponse;
+      setGame(gameResponse);
+
+      if (showError) {
+        setApiErrorMessage("");
+      }
+
+      return gameResponse;
+    } catch (error) {
+      if (showError) {
+        setApiErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "サーバーとの通信に失敗しました",
+        );
+      }
+
+      return null;
+    }
+  };
 
   useEffect(() => {
     if (!session) {
+      setGame(null);
       return;
     }
 
-    localStorage.setItem("yacht-session", JSON.stringify(session));
-    setScores(loadScores(session));
+    void fetchGame(session.gameCode);
+
+    const intervalId = window.setInterval(() => {
+      void fetchGame(session.gameCode, false);
+    }, 3000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [session]);
 
-  const upperScore = categories
-    .slice(0, 6)
-    .reduce<number>((total, category) => {
-      return total + (scores[category.id] ?? 0);
-    }, 0);
-
-  const bonusScore = upperScore >= 63 ? 35 : 0;
-
-  const totalScore =
-    Object.values(scores).reduce<number>((total, score) => {
-      return total + (score ?? 0);
-    }, 0) + bonusScore;
-
-  const saveSession = (gameCode: string, playerName: string) => {
+  const saveSession = (
+    gameCode: string,
+    playerId: string,
+    playerName: string,
+  ) => {
     const newSession: GameSession = {
       gameCode,
+      playerId,
       playerName,
     };
 
@@ -211,7 +234,7 @@ function App() {
     playerName: string,
   ): Promise<PlayerResponse> => {
     const response = await fetch(
-      `${API_BASE_URL}/api/games/${gameCode}/players`,
+      `${API_BASE_URL}/api/games/${encodeURIComponent(gameCode)}/players`,
       {
         method: "POST",
         headers: {
@@ -254,11 +277,10 @@ function App() {
         throw new Error("ゲームの作成に失敗しました");
       }
 
-      const game = (await gameResponse.json()) as GameResponse;
+      const createdGame = (await gameResponse.json()) as GameResponse;
+      const player = await createPlayer(createdGame.gameCode, playerName);
 
-      await createPlayer(game.gameCode, playerName);
-
-      saveSession(game.gameCode, playerName);
+      saveSession(createdGame.gameCode, player.id, player.name);
     } catch (error) {
       setApiErrorMessage(
         error instanceof Error
@@ -288,8 +310,9 @@ function App() {
     setApiErrorMessage("");
 
     try {
-      await createPlayer(gameCode, playerName);
-      saveSession(gameCode, playerName);
+      const player = await createPlayer(gameCode, playerName);
+
+      saveSession(gameCode, player.id, player.name);
     } catch (error) {
       setApiErrorMessage(
         error instanceof Error
@@ -309,7 +332,7 @@ function App() {
     localStorage.removeItem("yacht-session");
 
     setSession(null);
-    setScores(createEmptyScores());
+    setGame(null);
     setPlayerNameInput("");
     setGameCodeInput("");
     setSelectedCategory(null);
@@ -319,21 +342,19 @@ function App() {
   };
 
   const handleSelectCategory = (categoryId: string) => {
-    const currentScore = scores[categoryId];
-
-    setSelectedCategory(categoryId);
-
-    if (currentScore !== null) {
-      setScoreInput(String(currentScore));
-    } else {
-      setScoreInput("");
+    if (!currentPlayer) {
+      return;
     }
 
+    const currentScore = getPlayerScore(currentPlayer, categoryId);
+
+    setSelectedCategory(categoryId);
+    setScoreInput(currentScore === null ? "" : String(currentScore));
     setErrorMessage("");
   };
 
-  const handleSaveScore = () => {
-    if (!selectedCategory || scoreInput === "") {
+  const handleSaveScore = async () => {
+    if (!session || !selectedCategory || scoreInput === "") {
       setErrorMessage("得点を入力してください");
       return;
     }
@@ -374,28 +395,66 @@ function App() {
       return;
     }
 
-    const newScores = {
-      ...scores,
-      [selectedCategory]: score,
-    };
-
-    setScores(newScores);
-
-    if (session) {
-      localStorage.setItem(
-        getScoreStorageKey(session),
-        JSON.stringify(newScores),
-      );
-    }
-
-    setSelectedCategory(null);
-    setScoreInput("");
+    setIsSavingScore(true);
     setErrorMessage("");
-  };
 
-  const selectedCategoryData = categories.find(
-    (category) => category.id === selectedCategory,
-  );
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/games/${encodeURIComponent(
+          session.gameCode,
+        )}/players/${encodeURIComponent(
+          session.playerId,
+        )}/scores/${encodeURIComponent(selectedCategory)}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            score,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        const message =
+          response.status === 404
+            ? "プレイヤーまたはゲームが見つかりませんでした"
+            : "得点の保存に失敗しました";
+
+        throw new Error(message);
+      }
+
+      const updatedPlayer = (await response.json()) as PlayerResponse;
+
+      setGame((currentGame) => {
+        if (!currentGame) {
+          return currentGame;
+        }
+
+        return {
+          ...currentGame,
+          players: currentGame.players.map((player) =>
+            player.id === updatedPlayer.id ? updatedPlayer : player,
+          ),
+        };
+      });
+
+      setSelectedCategory(null);
+      setScoreInput("");
+      setApiErrorMessage("");
+
+      void fetchGame(session.gameCode, false);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "サーバーとの通信に失敗しました",
+      );
+    } finally {
+      setIsSavingScore(false);
+    }
+  };
 
   if (!session) {
     return (
@@ -482,7 +541,7 @@ function App() {
         </div>
 
         <div>
-          <span>プレイヤー</span>
+          <span>あなた</span>
           <strong>{session.playerName}</strong>
         </div>
 
@@ -491,62 +550,99 @@ function App() {
         </button>
       </section>
 
-      <section className="score-summary">
-        <p>合計得点</p>
-        <strong>{totalScore}</strong>
-        <span>点</span>
-      </section>
+      {apiErrorMessage && <p className="error-message">{apiErrorMessage}</p>}
 
-      <section className="score-board">
-        <h2>得点表</h2>
+      {!game ? (
+        <section className="entry-card">
+          <p>ゲーム情報を読み込んでいます...</p>
+        </section>
+      ) : (
+        <section className="players-section">
+          <h2>参加者の得点</h2>
 
-        <div className="score-list">
-          {categories.map((category) => {
-            const score = scores[category.id];
-            const isUsed = score !== null;
+          <div className="players-list">
+            {game.players.map((player) => {
+              const isCurrentPlayer = player.id === session.playerId;
+              const upperScore = calculateUpperScore(player);
+              const bonusScore = calculateBonusScore(player);
+              const totalScore = calculateTotalScore(player);
 
-            return (
-              <div
-                key={category.id}
-                className={`score-row ${isUsed ? "used" : ""}`}
-              >
-                <span className="category-name">{category.name}</span>
-
-                <span className="category-score">
-                  {isUsed ? `${score}点` : "未入力"}
-                </span>
-
-                <button
-                  className="edit-button"
-                  onClick={() => handleSelectCategory(category.id)}
+              return (
+                <section
+                  key={player.id}
+                  className={`player-score-card ${
+                    isCurrentPlayer ? "current-player" : ""
+                  }`}
                 >
-                  {isUsed ? "編集" : "入力"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+                  <div className="player-score-header">
+                    <div>
+                      <p className="subtitle">
+                        {isCurrentPlayer ? "あなたの得点" : "プレイヤー"}
+                      </p>
+                      <h2>{player.name}</h2>
+                    </div>
 
-      <section className="bonus-section">
-        <div>
-          <span>上段合計</span>
-          <strong>{upperScore}点</strong>
-        </div>
+                    <div className="player-total-score">
+                      <span>合計</span>
+                      <strong>{totalScore}</strong>
+                      <span>点</span>
+                    </div>
+                  </div>
 
-        <div>
-          <span>ボーナス</span>
-          <strong>{bonusScore}点</strong>
-        </div>
-      </section>
+                  <div className="score-list">
+                    {categories.map((category) => {
+                      const score = getPlayerScore(player, category.id);
+                      const isUsed = score !== null;
 
-      {selectedCategory && selectedCategoryData && (
+                      return (
+                        <div
+                          key={category.id}
+                          className={`score-row ${isUsed ? "used" : ""}`}
+                        >
+                          <span className="category-name">{category.name}</span>
+
+                          <span className="category-score">
+                            {isUsed ? `${score}点` : "未入力"}
+                          </span>
+
+                          {isCurrentPlayer && (
+                            <button
+                              className="edit-button"
+                              onClick={() => handleSelectCategory(category.id)}
+                            >
+                              {isUsed ? "編集" : "入力"}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="bonus-section">
+                    <div>
+                      <span>上段合計</span>
+                      <strong>{upperScore}点</strong>
+                    </div>
+
+                    <div>
+                      <span>ボーナス</span>
+                      <strong>{bonusScore}点</strong>
+                    </div>
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {selectedCategory && selectedCategoryData && currentPlayer && (
         <div className="modal-overlay">
           <div className="score-modal">
             <h2>{selectedCategoryData.name}</h2>
 
             <p>
-              {scores[selectedCategory] !== null
+              {getPlayerScore(currentPlayer, selectedCategory) !== null
                 ? "得点を修正してください"
                 : "今回の得点を入力してください"}
             </p>
@@ -576,8 +672,10 @@ function App() {
                 className="cancel-button"
                 onClick={() => {
                   setSelectedCategory(null);
+                  setScoreInput("");
                   setErrorMessage("");
                 }}
+                disabled={isSavingScore}
               >
                 キャンセル
               </button>
@@ -585,9 +683,13 @@ function App() {
               <button
                 className="save-button"
                 onClick={handleSaveScore}
-                disabled={scoreInput === ""}
+                disabled={scoreInput === "" || isSavingScore}
               >
-                {scores[selectedCategory] !== null ? "更新" : "確定"}
+                {isSavingScore
+                  ? "保存中..."
+                  : getPlayerScore(currentPlayer, selectedCategory) !== null
+                    ? "更新"
+                    : "確定"}
               </button>
             </div>
           </div>
