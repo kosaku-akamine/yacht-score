@@ -41,7 +41,9 @@ public class GameService {
     public GameResponse createGame() {
         String gameCode = generateUniqueGameCode();
 
-        gameRepository.save(new GameEntity(gameCode));
+        gameRepository.save(
+                new GameEntity(gameCode)
+        );
 
         return new GameResponse(
                 gameCode,
@@ -51,12 +53,15 @@ public class GameService {
 
     @Transactional(readOnly = true)
     public GameResponse getGame(String gameCode) {
-        String normalizedGameCode = gameCode.toUpperCase();
+        String normalizedGameCode =
+                normalizeGameCode(gameCode);
 
         validateGameExists(normalizedGameCode);
 
         List<PlayerResponse> players =
-                playerRepository.findByGame_GameCode(normalizedGameCode)
+                playerRepository.findByGame_GameCode(
+                                normalizedGameCode
+                        )
                         .stream()
                         .map(this::toPlayerResponse)
                         .toList();
@@ -67,13 +72,18 @@ public class GameService {
         );
     }
 
+    @Transactional
     public PlayerResponse createPlayer(
             String gameCode,
             String playerName
     ) {
-        String normalizedGameCode = gameCode.toUpperCase();
+        String normalizedGameCode =
+                normalizeGameCode(gameCode);
+
         String normalizedPlayerName =
-                playerName == null ? "" : playerName.trim();
+                playerName == null
+                        ? ""
+                        : playerName.trim();
 
         if (normalizedPlayerName.isEmpty()) {
             throw new IllegalArgumentException(
@@ -81,18 +91,20 @@ public class GameService {
             );
         }
 
-        GameEntity game = gameRepository.findById(normalizedGameCode)
-                .orElseThrow(
-                        () -> new GameNotFoundException(
-                                normalizedGameCode
-                        )
-                );
+        GameEntity game =
+                gameRepository.findById(normalizedGameCode)
+                        .orElseThrow(
+                                () -> new GameNotFoundException(
+                                        normalizedGameCode
+                                )
+                        );
 
-        PlayerEntity player = new PlayerEntity(
-                generatePlayerId(),
-                normalizedPlayerName,
-                game
-        );
+        PlayerEntity player =
+                new PlayerEntity(
+                        generatePlayerId(),
+                        normalizedPlayerName,
+                        game
+                );
 
         playerRepository.save(player);
 
@@ -106,31 +118,44 @@ public class GameService {
             String categoryId,
             Integer score
     ) {
-        String normalizedGameCode = gameCode.toUpperCase();
+        String normalizedGameCode =
+                normalizeGameCode(gameCode);
 
-        validateScore(categoryId, score);
+        String normalizedPlayerId =
+                normalizePlayerId(playerId);
 
-        PlayerEntity player = playerRepository.findById(playerId)
-                .filter(playerEntity ->
-                        playerEntity
-                                .getGame()
-                                .getGameCode()
-                                .equals(normalizedGameCode)
-                )
-                .orElseThrow(
-                        () -> new PlayerNotFoundException(playerId)
-                );
+        String normalizedCategoryId =
+                normalizeCategoryId(categoryId);
+
+        validateScore(
+                normalizedCategoryId,
+                score
+        );
+
+        PlayerEntity player =
+                playerRepository.findById(normalizedPlayerId)
+                        .filter(playerEntity ->
+                                playerEntity
+                                        .getGame()
+                                        .getGameCode()
+                                        .equals(normalizedGameCode)
+                        )
+                        .orElseThrow(
+                                () -> new PlayerNotFoundException(
+                                        normalizedPlayerId
+                                )
+                        );
 
         PlayerScoreEntity playerScore =
                 playerScoreRepository
                         .findByPlayer_IdAndCategoryId(
-                                playerId,
-                                categoryId
+                                normalizedPlayerId,
+                                normalizedCategoryId
                         )
                         .orElseGet(
                                 () -> new PlayerScoreEntity(
                                         player,
-                                        categoryId,
+                                        normalizedCategoryId,
                                         score
                                 )
                         );
@@ -167,7 +192,9 @@ public class GameService {
         );
     }
 
-    private void validateGameExists(String gameCode) {
+    private void validateGameExists(
+            String gameCode
+    ) {
         if (!gameRepository.existsById(gameCode)) {
             throw new GameNotFoundException(gameCode);
         }
@@ -185,24 +212,55 @@ public class GameService {
 
         switch (categoryId) {
             case "aces" ->
-                    validateRange(categoryId, score, 0, 5);
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            5
+                    );
 
             case "deuces" ->
-                    validateRange(categoryId, score, 0, 10);
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            10
+                    );
 
             case "threes" ->
-                    validateRange(categoryId, score, 0, 15);
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            15
+                    );
 
             case "fours" ->
-                    validateRange(categoryId, score, 0, 20);
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            20
+                    );
 
             case "fives" ->
-                    validateRange(categoryId, score, 0, 25);
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            25
+                    );
 
             case "sixes",
+                 "three-of-a-kind",
                  "four-of-a-kind",
                  "choice" ->
-                    validateRange(categoryId, score, 0, 30);
+                    validateRange(
+                            categoryId,
+                            score,
+                            0,
+                            30
+                    );
 
             case "full-house" ->
                     validateFixedScore(
@@ -235,7 +293,8 @@ public class GameService {
 
             default ->
                     throw new IllegalArgumentException(
-                            "Unknown category: " + categoryId
+                            "Unknown category: "
+                                    + categoryId
                     );
         }
     }
@@ -271,6 +330,48 @@ public class GameService {
         }
     }
 
+    private String normalizeGameCode(
+            String gameCode
+    ) {
+        if (gameCode == null || gameCode.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Game code is required"
+            );
+        }
+
+        return gameCode
+                .trim()
+                .toUpperCase();
+    }
+
+    private String normalizePlayerId(
+            String playerId
+    ) {
+        if (playerId == null || playerId.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Player id is required"
+            );
+        }
+
+        return playerId
+                .trim()
+                .toUpperCase();
+    }
+
+    private String normalizeCategoryId(
+            String categoryId
+    ) {
+        if (categoryId == null || categoryId.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Category id is required"
+            );
+        }
+
+        return categoryId
+                .trim()
+                .toLowerCase();
+    }
+
     private String generateUniqueGameCode() {
         String gameCode;
 
@@ -278,7 +379,10 @@ public class GameService {
             gameCode = UUID.randomUUID()
                     .toString()
                     .replace("-", "")
-                    .substring(0, GAME_CODE_LENGTH)
+                    .substring(
+                            0,
+                            GAME_CODE_LENGTH
+                    )
                     .toUpperCase();
         } while (gameRepository.existsById(gameCode));
 
@@ -289,7 +393,10 @@ public class GameService {
         return UUID.randomUUID()
                 .toString()
                 .replace("-", "")
-                .substring(0, PLAYER_ID_LENGTH)
+                .substring(
+                        0,
+                        PLAYER_ID_LENGTH
+                )
                 .toUpperCase();
     }
 }
