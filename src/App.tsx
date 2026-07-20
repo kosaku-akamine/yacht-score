@@ -66,6 +66,12 @@ const categories: Category[] = [
     maxScore: 30,
   },
   {
+    id: "three-of-a-kind",
+    name: "スリーダイス",
+    minScore: 0,
+    maxScore: 30,
+  },
+  {
     id: "four-of-a-kind",
     name: "フォーダイス",
     minScore: 0,
